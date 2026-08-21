@@ -1,0 +1,40 @@
+name: Apply cash chart Y axis v2
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-y-axis-v2.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch chart directly
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('index.html')
+          s=p.read_text()
+          old='''let w=1000,h=300,pl=48,pr=24,pt=24,pb=46,v=a.map(x=>x.closing),mn=Math.min(...v,f.buffer),mx=Math.max(...v,f.buffer),pad=Math.max((mx-mn)*.12,1),lo=Math.max(0,mn-pad),hi=mx+pad,sp=hi-lo||1;
+let pts=a.map((x,i)=>({x:pl+i*(w-pl-pr)/Math.max(1,a.length-1),y:pt+(hi-x.closing)*(h-pt-pb)/sp,...x})),by=pt+(hi-f.buffer)*(h-pt-pb)/sp;
+let labels=pts.map((p,i)=>{if(i%Math.ceil(a.length/8)!==0&&i!==a.length-1)return'';return`<text x="${p.x}" y="${h-14}" text-anchor="middle" fill="#6f8198" font-size="11">${date(p.end).replace(' г.','')}</text>`}).join('');
+let circles=pts.map((p,i)=>`<circle class="week-dot" data-i="${i}" cx="${p.x}" cy="${p.y}" r="5" fill="#4f87ff" stroke="#0c1929" stroke-width="3" style="cursor:pointer"/>`).join('');
+box.innerHTML=`<div id="chartTooltip" class="chart-tooltip"></div><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><line x1="${pl}" y1="${by}" x2="${w-pr}" y2="${by}" stroke="#d58a55" stroke-dasharray="6 6"/><polyline points="${pts.map(p=>p.x+','+p.y).join(' ')}" fill="none" stroke="#4f87ff" stroke-width="3" vector-effect="non-scaling-stroke"/>${circles}${labels}</svg>`;'''
+          new='''let w=1000,h=300,pl=92,pr=24,pt=24,pb=46,v=a.map(x=>x.closing),mn=Math.min(...v,f.buffer),mx=Math.max(...v,f.buffer),pad=Math.max((mx-mn)*.12,1),lo=Math.max(0,mn-pad),hi=mx+pad,sp=hi-lo||1;
+let pts=a.map((x,i)=>({x:pl+i*(w-pl-pr)/Math.max(1,a.length-1),y:pt+(hi-x.closing)*(h-pt-pb)/sp,...x})),by=pt+(hi-f.buffer)*(h-pt-pb)/sp;
+let labels=pts.map((p,i)=>{if(i%Math.ceil(a.length/8)!==0&&i!==a.length-1)return'';return`<text x="${p.x}" y="${h-14}" text-anchor="middle" fill="#6f8198" font-size="11">${date(p.end).replace(' г.','')}</text>`}).join('');
+let ticks=6,grid='';for(let i=0;i<ticks;i++){let val=lo+(hi-lo)*i/(ticks-1),y=pt+(hi-val)*(h-pt-pb)/sp,label=Math.abs(val)>=1000000?'$'+(val/1000000).toFixed(1)+'M':Math.abs(val)>=1000?'$'+Math.round(val/1000)+'k':'$'+Math.round(val);grid+=`<line x1="${pl}" y1="${y}" x2="${w-pr}" y2="${y}" stroke="#1a2a3d" stroke-width="1"/><text x="${pl-14}" y="${y+4}" text-anchor="end" fill="#91a2b7" font-size="12">${label}</text>`}
+let circles=pts.map((p,i)=>`<circle class="week-dot" data-i="${i}" cx="${p.x}" cy="${p.y}" r="5" fill="#4f87ff" stroke="#0c1929" stroke-width="3" style="cursor:pointer"/>`).join('');
+box.innerHTML=`<div id="chartTooltip" class="chart-tooltip"></div><svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${grid}<line x1="${pl}" y1="${by}" x2="${w-pr}" y2="${by}" stroke="#d58a55" stroke-dasharray="6 6"/><polyline points="${pts.map(p=>p.x+','+p.y).join(' ')}" fill="none" stroke="#4f87ff" stroke-width="3" vector-effect="non-scaling-stroke"/>${circles}${labels}</svg>`;'''
+          if old not in s:
+            raise SystemExit('old chart block not found')
+          p.write_text(s.replace(old,new))
+      - name: Commit index
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          git commit -m "feat: show dollar Y axis on cash chart"
+          git push
