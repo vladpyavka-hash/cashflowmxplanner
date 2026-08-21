@@ -63,10 +63,34 @@ function txAmountMinor(t) {
 function txSpotId(t) {
   return String(first(t, ['spot_id', 'spotId', 'spot']) ?? 'unknown');
 }
+function normalizePosterDate(value) {
+  if (value == null || value === '') return null;
+
+  if (typeof value === 'number' || /^\d{10,13}$/.test(String(value).trim())) {
+    let n = Number(value);
+    if (Number.isFinite(n)) {
+      if (n < 1e12) n *= 1000;
+      const d = new Date(n);
+      if (Number.isFinite(d.getTime())) return d.toISOString().slice(0, 10);
+    }
+  }
+
+  const raw = String(value).trim();
+  let m = raw.match(/^(\d{4})[-/.]?(\d{2})[-/.]?(\d{2})(?:\D|$)/);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+
+  m = raw.match(/^(\d{2})[./-](\d{2})[./-](\d{4})(?:\D|$)/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+
+  const d = new Date(raw);
+  if (Number.isFinite(d.getTime())) return d.toISOString().slice(0, 10);
+  return null;
+}
 function txDate(t) {
-  const raw = String(first(t, ['date_close', 'close_date', 'dateClose', 'date', 'created_at']) || '');
-  const m = raw.match(/(\d{4})[-/.]?(\d{2})[-/.]?(\d{2})/);
-  return m ? `${m[1]}-${m[2]}-${m[3]}` : raw.slice(0, 10);
+  return normalizePosterDate(first(t, [
+    'date_close', 'close_date', 'dateClose', 'date_start', 'dateStart',
+    'date', 'created_at', 'createdAt', 'time', 'timestamp'
+  ]));
 }
 function isClosed(t) {
   const status = String(first(t, ['status', 'transaction_status', 'state']) ?? '').toLowerCase();
@@ -85,13 +109,15 @@ async function getDashboard(from, to, fx) {
   const stores = new Map();
   const days = new Map();
   let totalMinor = 0;
+  let invalidDates = 0;
   for (const t of txs) {
     const amount = txAmountMinor(t);
     const sid = txSpotId(t);
-    const day = txDate(t) || 'unknown';
+    const day = txDate(t);
     totalMinor += amount;
     if (!stores.has(sid)) stores.set(sid, { spotId: sid, name: spotNames.get(sid) || `Магазин ${sid}`, revenueMinor: 0, checks: 0 });
     const s = stores.get(sid); s.revenueMinor += amount; s.checks += 1;
+    if (!day) { invalidDates += 1; continue; }
     if (!days.has(day)) days.set(day, { date: day, revenueMinor: 0, checks: 0 });
     const d = days.get(day); d.revenueMinor += amount; d.checks += 1;
   }
@@ -112,7 +138,8 @@ async function getDashboard(from, to, fx) {
     from, to, fx, currency: 'USD', sourceCurrency: 'MXN',
     totals: { revenueUsd: totalUsd, checks: txs.length, avgCheckUsd: txs.length ? totalUsd / txs.length : 0, stores: normalizedStores.length },
     stores: normalizedStores,
-    daily
+    daily,
+    diagnostics: { transactions: txs.length, invalidDates }
   };
 }
 
