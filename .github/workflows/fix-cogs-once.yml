@@ -1,0 +1,38 @@
+name: Fix COGS calculation once
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/fix-cogs-once.yml'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch COGS calculation
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('index.html')
+          s = p.read_text()
+          old = """function dailyFlow(){let mult=state.scenario==='downside'?+state.settings.downsideMultiplier:state.scenario==='upside'?+state.settings.upsideMultiplier:1;return dates().map(d=>{let revenueToday=0,income=0,expense=0;
+          for(let r of state.revenue){let n=dim(r.month),daily=+r.amount/n*mult;for(let day=1;day<=n;day++){let src=r.month+'-'+String(day).padStart(2,'0');if(addDays(src,+r.delay||0)===d){revenueToday+=daily;income+=daily}}}
+          for(let c of state.cashflows.filter(c=>occurs(c,d))){let v=c.amountType==='revenue-percent'?revenueToday*(+c.amount||0)/100:+c.amount||0;c.direction==='income'?income+=v:expense+=v}
+          return{date:d,income,expense,revenueToday}})}"""
+          new = """function dailyFlow(){let mult=state.scenario==='downside'?+state.settings.downsideMultiplier:state.scenario==='upside'?+state.settings.upsideMultiplier:1;return dates().map(d=>{let salesToday=0,cashRevenueToday=0,income=0,expense=0;
+          for(let r of state.revenue){let n=dim(r.month),daily=(+r.amount||0)/n*mult;if(d.slice(0,7)===r.month)salesToday+=daily;let sourceDate=addDays(d,-(+r.delay||0));if(sourceDate.slice(0,7)===r.month)cashRevenueToday+=daily}
+          income+=cashRevenueToday;
+          for(let c of state.cashflows.filter(c=>occurs(c,d))){let v=c.amountType==='revenue-percent'?salesToday*(+c.amount||0)/100:+c.amount||0;c.direction==='income'?income+=v:expense+=v}
+          return{date:d,income,expense,revenueToday:salesToday,salesToday,cashRevenueToday}})}"""
+          if old not in s:
+              raise SystemExit('Target dailyFlow block not found')
+          p.write_text(s.replace(old, new))
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- index.html
+          git commit -m "fix: calculate COGS from sales revenue" || exit 0
+          git push
