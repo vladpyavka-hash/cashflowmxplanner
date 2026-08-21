@@ -38,3 +38,4 @@ box.innerHTML=`<div id="chartTooltip" class="chart-tooltip"></div><svg viewBox="
           git add -- index.html
           git commit -m "feat: add dollar Y axis to cash chart" || exit 0
           git push
+# retrigger
