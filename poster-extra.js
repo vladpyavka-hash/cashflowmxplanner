@@ -7,16 +7,17 @@ function hourLabel(h){return `${String(h).padStart(2,'0')}:00`}
 
 function createPosterExtra(ctx){
   const {poster,posterTry,rows,isClosed,compactDate,txDate,txDateTimeMexico,txAmount,txSpot,txId,txClient,txUser,txUserName,first,MEXICO_TZ}=ctx;
+  const mexicoToday=()=>new Intl.DateTimeFormat('en-CA',{timeZone:MEXICO_TZ,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 
   async function spotsMap(){const spots=rows(await posterTry(['spots.getSpots'])||[]);return new Map(spots.map(s=>[String(first(s,['spot_id','id'])??''),String(first(s,['spot_name','name'])||'')]))}
 
   async function getHourlyAnalysis(from,to,fx){
     const txs=rows(await poster('dash.getTransactions',{dateFrom:compactDate(from),dateTo:compactDate(to)})).filter(isClosed);
-    const names=await spotsMap(),stores=new Map();
-    for(const t of txs){const day=txDate(t),dt=txDateTimeMexico(t),hour=hourFromMexicoDateTime(dt),sid=txSpot(t),amount=txAmount(t);if(!day||hour==null||hour<0||hour>23)continue;if(!stores.has(sid))stores.set(sid,{spotId:sid,name:names.get(sid)||`Магазин ${sid}`,days:new Map()});const s=stores.get(sid);if(!s.days.has(day))s.days.set(day,{totalMinor:0,hours:Array.from({length:24},()=>({minor:0,checks:0}))});const d=s.days.get(day);d.totalMinor+=amount;d.hours[hour].minor+=amount;d.hours[hour].checks++}
+    const names=await spotsMap(),stores=new Map(),today=mexicoToday();
+    for(const t of txs){const day=txDate(t),dt=txDateTimeMexico(t),hour=hourFromMexicoDateTime(dt),sid=txSpot(t),amount=txAmount(t);if(!day||day===today||hour==null||hour<0||hour>23)continue;if(!stores.has(sid))stores.set(sid,{spotId:sid,name:names.get(sid)||`Магазин ${sid}`,days:new Map()});const s=stores.get(sid);if(!s.days.has(day))s.days.set(day,{totalMinor:0,hours:Array.from({length:24},()=>({minor:0,checks:0}))});const d=s.days.get(day);d.totalMinor+=amount;d.hours[hour].minor+=amount;d.hours[hour].checks++}
     const toUsd=v=>v/100/fx,weekdays=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
     const result=[...stores.values()].map(s=>{const byWeekday=[];for(let w=0;w<7;w++){const active=[...s.days.entries()].filter(([date,d])=>weekdayIndex(date)===w&&d.totalMinor>0);const count=active.length,hours=Array.from({length:24},(_,h)=>{const minor=active.reduce((sum,[,d])=>sum+d.hours[h].minor,0),checks=active.reduce((sum,[,d])=>sum+d.hours[h].checks,0);return{hour:h,label:hourLabel(h),avgRevenueUsd:count?toUsd(minor)/count:0,avgChecks:count?checks/count:0}}),avgDailyRevenueUsd=count?active.reduce((sum,[,d])=>sum+toUsd(d.totalMinor),0)/count:0;for(const x of hours)x.shareOfDay=avgDailyRevenueUsd?x.avgRevenueUsd/avgDailyRevenueUsd:0;const rec=recommendedWindow(hours),peak=Math.max(...hours.map(x=>x.avgRevenueUsd),0);byWeekday.push({weekday:w,label:weekdays[w],activeDays:count,avgDailyRevenueUsd,hours,peakHour:peak>0?hours.find(x=>x.avgRevenueUsd===peak)?.hour:null,recommended:{open:rec.open,close:rec.close,openLabel:rec.open==null?'—':hourLabel(rec.open),closeLabel:rec.close==null?'—':hourLabel(rec.close%24),coverage:rec.coverage}})}return{spotId:s.spotId,name:s.name,byWeekday}}).sort((a,b)=>a.name.localeCompare(b.name));
-    return{from,to,fx,timeZone:MEXICO_TZ,method:'Average by weekday/hour. Days with zero total store revenue are excluded; zero-sales hours inside active days remain zero.',stores:result};
+    return{from,to,fx,timeZone:MEXICO_TZ,excludedCurrentDay:today,method:'Average by weekday/hour. Days with zero total store revenue and the current incomplete Mexico City day are excluded; zero-sales hours inside active days remain zero.',stores:result};
   }
 
   async function getSalesExport(from,to,fx){
