@@ -2,6 +2,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
+const { createPosterExtra } = require('./poster-extra');
 
 const ROOT = __dirname;
 const MEXICO_TZ = 'America/Mexico_City';
@@ -60,20 +61,12 @@ function parsePosterDate(value){
   if(/^\d{10,13}$/.test(raw)){let n=Number(raw);if(n<1e12)n*=1000;const d=new Date(n);return Number.isFinite(d.getTime())?d:null}
   if(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(raw)){const d=new Date(raw);return Number.isFinite(d.getTime())?d:null}
   const isoLike=raw.match(/^(\d{4})[-/.]?(\d{2})[-/.]?(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
-  if(isoLike){
-    const [,y,mo,da,h='00',mi='00',s='00']=isoLike;
-    // Poster often returns a timezone-less local POS timestamp. Treat it as Mexico City local time.
-    const localIso=`${y}-${mo}-${da}T${h}:${mi}:${s}-06:00`;
-    const d=new Date(localIso);return Number.isFinite(d.getTime())?d:null;
-  }
+  if(isoLike){const [,y,mo,da,h='00',mi='00',s='00']=isoLike;const d=new Date(`${y}-${mo}-${da}T${h}:${mi}:${s}-06:00`);return Number.isFinite(d.getTime())?d:null}
   const eu=raw.match(/^(\d{2})[./-](\d{2})[./-](\d{4})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
   if(eu){const [,da,mo,y,h='00',mi='00',s='00']=eu;const d=new Date(`${y}-${mo}-${da}T${h}:${mi}:${s}-06:00`);return Number.isFinite(d.getTime())?d:null}
   const d=new Date(raw);return Number.isFinite(d.getTime())?d:null;
 }
-function normalizeDate(value){
-  const d=parsePosterDate(value);
-  return d?mexicoDateFromDate(d):null;
-}
+function normalizeDate(value){const d=parsePosterDate(value);return d?mexicoDateFromDate(d):null}
 const txDate=t=>normalizeDate(rawTxDate(t));
 const txDateTimeMexico=t=>{const d=parsePosterDate(rawTxDate(t));return d?mexicoDateTimeFromDate(d):null};
 const txAmount=t=>num(first(t,['payed_sum','payedSum','sum','transaction_sum','total_sum','total','amount']));
@@ -123,6 +116,8 @@ async function getTransactionDiagnostics(date,fx,limit){
   return{timeZone:MEXICO_TZ,date,nowMexico:mexicoDateTimeFromDate(new Date()),count:items.length,transactions:items};
 }
 
+const posterExtra=createPosterExtra({poster,posterTry,rows,isClosed,compactDate,txDate,txDateTimeMexico,txAmount,txSpot,txId,txClient,txUser,txUserName,first,MEXICO_TZ});
+
 function serveStatic(req,res,pathname){const target=pathname==='/'?'/index.html':pathname,file=path.normalize(path.join(ROOT,decodeURIComponent(target)));if(!file.startsWith(ROOT)||!fs.existsSync(file)||fs.statSync(file).isDirectory()){res.writeHead(404);return res.end('Not found')}const ext=path.extname(file).toLowerCase(),types={'.html':'text/html; charset=utf-8','.js':'application/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json; charset=utf-8'};res.writeHead(200,{'Content-Type':types[ext]||'application/octet-stream'});fs.createReadStream(file).pipe(res)}
 
-http.createServer(async(req,res)=>{try{const url=new URL(req.url,`http://${req.headers.host||'localhost'}`);if(url.pathname==='/api/poster/health')return json(res,200,{configured:Boolean(POSTER_TOKEN),fx:DEFAULT_FX,timeZone:MEXICO_TZ,nowMexico:mexicoDateTimeFromDate(new Date())});const today=mexicoDateFromDate(new Date()),from=url.searchParams.get('from')||today.slice(0,8)+'01',to=url.searchParams.get('to')||today,fx=Number(url.searchParams.get('fx')||DEFAULT_FX);if(!Number.isFinite(fx)||fx<=0)return json(res,400,{error:'Некорректный MXN_PER_USD'});if(url.pathname==='/api/poster/dashboard')return json(res,200,await getDashboard(from,to,fx));if(url.pathname==='/api/poster/products')return json(res,200,await getProducts(from,to,fx));if(url.pathname==='/api/poster/salespeople')return json(res,200,await getSalespeople(from,to,fx));if(url.pathname==='/api/poster/debug-transactions'){const date=url.searchParams.get('date')||today,limit=Math.min(100,Math.max(1,Number(url.searchParams.get('limit')||20)));return json(res,200,await getTransactionDiagnostics(date,fx,limit))}return serveStatic(req,res,url.pathname)}catch(e){return json(res,500,{error:e.message||String(e)})}}).listen(PORT,()=>{console.log(`Cashflow / Poster dashboard: http://localhost:${PORT}/poster.html`);console.log(`Poster time zone: ${MEXICO_TZ}`)});
+http.createServer(async(req,res)=>{try{const url=new URL(req.url,`http://${req.headers.host||'localhost'}`);if(url.pathname==='/api/poster/health')return json(res,200,{configured:Boolean(POSTER_TOKEN),fx:DEFAULT_FX,timeZone:MEXICO_TZ,nowMexico:mexicoDateTimeFromDate(new Date())});const today=mexicoDateFromDate(new Date()),from=url.searchParams.get('from')||today.slice(0,8)+'01',to=url.searchParams.get('to')||today,fx=Number(url.searchParams.get('fx')||DEFAULT_FX);if(!Number.isFinite(fx)||fx<=0)return json(res,400,{error:'Некорректный MXN_PER_USD'});if(url.pathname==='/api/poster/dashboard')return json(res,200,await getDashboard(from,to,fx));if(url.pathname==='/api/poster/products')return json(res,200,await getProducts(from,to,fx));if(url.pathname==='/api/poster/salespeople')return json(res,200,await getSalespeople(from,to,fx));if(url.pathname==='/api/poster/hourly')return json(res,200,await posterExtra.getHourlyAnalysis(from,to,fx));if(url.pathname==='/api/poster/export-sales'){const exportFrom=url.searchParams.get('from')||'2020-01-01',exportTo=url.searchParams.get('to')||today;return json(res,200,await posterExtra.getSalesExport(exportFrom,exportTo,fx))}if(url.pathname==='/api/poster/debug-transactions'){const date=url.searchParams.get('date')||today,limit=Math.min(100,Math.max(1,Number(url.searchParams.get('limit')||20)));return json(res,200,await getTransactionDiagnostics(date,fx,limit))}return serveStatic(req,res,url.pathname)}catch(e){return json(res,500,{error:e.message||String(e)})}}).listen(PORT,()=>{console.log(`Cashflow / Poster dashboard: http://localhost:${PORT}/poster.html`);console.log(`Poster time zone: ${MEXICO_TZ}`)});
